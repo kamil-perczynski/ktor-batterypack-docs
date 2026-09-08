@@ -70,6 +70,10 @@ export default defineConfig({
         items: [
           { text: "Validation", link: "/validation/validation" },
           { text: "Validation Codegen", link: "/validation/validation-codegen" },
+          {
+            text: "Advanced Validation Codegen",
+            link: "/validation/validation-codegen-advanced",
+          },
         ],
       },
       {
