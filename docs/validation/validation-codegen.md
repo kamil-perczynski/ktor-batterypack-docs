@@ -8,11 +8,11 @@ It makes three things easy:
 - validating raw `JsonNode` payloads before deserialization, using the same DTO annotations as the constraint source
 - overriding any generated method with custom logic — polymorphic dispatch, cross-field rules, or skipping validation entirely
 
-The processor builds on [ktor-batterypack-validation](/validation/validation), which provides the runtime types (`ValidationResult`, `ValidationCall`, `Constraints`). Business-rule validation is not generated — the processor gives you override hooks to inject it. OpenAPI schema generation is a separate concern; see [OpenAPI Generator](/core/openapi-generator).
+The processor builds on [ktor-batterypack-validation](/validation/validation), which provides the runtime types (`ValidationResult`, `ValidationCall`, `Constraints`). Business-rule validation is not generated — the processor gives you [manual override](#manual-overrides) hooks to inject it. OpenAPI schema generation is a separate concern; see [OpenAPI Generator](/core/openapi-generator).
 
 ## Setup
 
-The `ktor-batterypack-gradle-plugin` applies KSP automatically. If you are not using the plugin, apply KSP manually:
+The [`ktor-batterypack-gradle-plugin`](/gradle-plugin/) applies KSP automatically. If you are not using the plugin, apply KSP manually:
 
 ```kotlin
 plugins {
@@ -37,7 +37,7 @@ The generated class is placed in the same package as the annotated interface, na
 | **Method parameter** | The DTO class directly | `JsonNode` with `@ValidationParamType` bridge |
 | **Constraint source** | Jakarta annotations on the DTO | Same — reads DTO metadata via `@ValidationParamType` |
 
-Both modes read constraints from the same Jakarta annotations on your data classes. The difference is what the generated code validates against.
+The constraint source is the same in both modes — what differs is the value the generated code checks: the deserialized DTO, or the raw JSON tree.
 
 ## DTO validation with `@Validator`
 
@@ -62,11 +62,11 @@ data class Person(
 )
 
 data class Address(
+    @field:Size(min = 1, max = 100)
     val addressLine1: String,
     val addressLine2: String,
     @field:NotBlank
     @field:Pattern(regexp = "\\d{2}-\\d{3}")
-    @field:Size(min = 1, max = 100)
     val zipCode: String,
 )
 ```
@@ -78,7 +78,9 @@ interface PersonValidator {
 }
 ```
 
-The entry-point method must return `ValidationResult<T>` where `T` matches the parameter type. KSP generates `PersonValidatorImpl` in the same package. Use it directly or inject through your DI container.
+KSP generates `PersonValidatorImpl` in the same package. Use it directly or inject it through your DI container.
+
+Every entry-point method follows one shape: exactly one DTO parameter, returning `ValidationResult<T>` with `T` matching that parameter. Multiple entry points per interface are fine — each gets its own generated implementation.
 
 Calling `.check()` on the result throws `ValidationException` — handled globally by the core [exception handler](/core/exceptions).
 
@@ -101,65 +103,32 @@ interface JsonPersonValidator {
 
 The annotation says: "generate validation logic as if this method accepted `Person`, but run the checks against the `JsonNode`."
 
-## Overriding generated methods
+## Recommended usage: companion object
 
-Any method in the interface **with a body** is treated as a manual override. The generator will call your implementation instead of generating one.
-
-### Replacing a nested type validator
-
-If you provide a body for a method matching a nested type, the generated code delegates to your implementation:
+The generated `*Impl` classes work on their own, but the idiomatic way to expose a validator is delegation from the interface's companion object:
 
 ```kotlin
-@JsonValidator
-interface JsonPersonValidator {
+@Validator
+interface UserDtoValidator {
 
-    @ValidationParamType(Person::class)
-    fun validatePerson(person: JsonNode): ValidationResult<JsonNode>
+    companion object : UserDtoValidator by UserDtoValidatorImpl()
 
-    @ValidationParamType(PersonIdentification::class)
-    fun validatePersonIdentification(personIdentification: ObjectNode?, call: ValidationCall) {
-        if (personIdentification == null) return
+    fun validate(userCreate: UserCreate): ValidationResult<UserCreate>
 
-        when (val type = JsonTypeChecks.checkString("type", personIdentification)) {
-            ID_DOCUMENT_CHECK.name -> validateIdDocIdentification(personIdentification, call)
-            LIVENESS_CHECK.name -> validateLivenessIdentification(personIdentification, call)
-            else -> call.propertyError(
-                "type",
-                SingleConstraintError("EnumConstant", "Unknown enum constant: '$type'")
-            )
-        }
-    }
-
-    @ValidationParamType(IdDocIdentification::class)
-    fun validateIdDocIdentification(idDocIdentification: ObjectNode?, call: ValidationCall)
-
-    @ValidationParamType(LivenessIdentification::class)
-    fun validateLivenessIdentification(livenessIdentification: ObjectNode?, call: ValidationCall)
+    fun validate(userUpdate: UserUpdate): ValidationResult<UserUpdate>
 }
 ```
 
-Here `validatePersonIdentification` has a body: it inspects the `type` discriminator and dispatches to per-subtype validators, each of which is still auto-generated (no body). This is the pattern for **polymorphic hierarchies**.
+You call it without an instance — `UserDtoValidator.validate(dto)` — or keep injecting `UserDtoValidatorImpl` through your DI container; the companion just removes the ceremony. It is plain Kotlin delegation, so it works the same way for `@JsonValidator` interfaces.
 
-### Adding extra checks alongside generation
+## Manual overrides
 
-If you define a method with a **different name** than the generated one for the same type, the codegen calls both — your method runs *in addition to* the generated checks:
+Generated methods handle single-field constraints. When a rule spans several fields, or one nested type needs different handling, declare that method **with a body** — in either mode. That makes it a manual override, and there are exactly two mechanisms:
 
-```kotlin
-@ValidationParamType(Address::class)
-fun checkAddressLines(address: ObjectNode?, call: ValidationCall) {
-    val line1 = address?.get("addressLine1")?.asString(null) ?: return
-    val line2 = address.get("addressLine2")?.asString(null) ?: return
+- **Replace** — a body on a method matching the generated naming convention (`validate{TypeName}`) replaces generation for that type. Your implementation is the only validation that runs for it.
+- **Add** — a body on a differently named method runs after the generated checks, contributing errors to the same `ValidationCall`.
 
-    if (line1.isNotBlank() && line2.isNotBlank() && line1 == line2) {
-        call.propertyError(
-            "addressLine1",
-            SingleConstraintError("AddressLineUnique", "Address lines must be unique")
-        )
-    }
-}
-```
-
-The generated `validateAddress` runs the Jakarta constraint checks. Then `checkAddressLines` runs your cross-field logic. Both contribute errors to the same `ValidationCall`.
+Cross-field rules, polymorphic dispatch, object-level checks, and skipping a nested type all build on these two mechanisms. They are covered in [Advanced Validation Codegen](/validation/validation-codegen-advanced).
 
 ## Supported constraints
 
@@ -174,6 +143,10 @@ The generator recognizes standard Jakarta Bean Validation annotations:
 - `@Pattern(regexp)`
 - `@Email`
 
+The list is not fixed — custom constraint descriptors extend it with your own annotations. See [Advanced Validation Codegen](/validation/validation-codegen-advanced#custom-constraint-descriptors).
+
+Each annotation maps to a check method named `check{AnnotationSimpleName}` — `@NotBlank` becomes `checkNotBlank`, `@Email` becomes `checkEmail`. The implementations live in two classes from the runtime module: `io.github.ktor_batterypack.validation.Constraints` for typed validators, and `io.github.ktor_batterypack.validation.JsonConstraints` for the JSON variants whose logic has to operate on JSON trees (e.g. `@NotEmpty`, `@Size`). They are the same methods you can call by hand — see [Constraint helpers](/validation/validation#constraint-helpers).
+
 Annotation targets `@field:`, `@get:`, and `@param:` are all picked up.
 
 List item constraints work too:
@@ -187,7 +160,7 @@ The generator produces per-item checks inside the list iteration loop.
 
 ## Error output shape
 
-Validation errors are structured as nested JSON matching the shape of the input object. Here's what a failed validation of a `Person` looks like:
+Validation errors are structured as nested JSON matching the shape of the input object. For a `Person` submitted with blank names and a blank zip code, validation fails like this:
 
 ```json
 {
@@ -208,25 +181,7 @@ Validation errors are structured as nested JSON matching the shape of the input 
 
 Each field maps to an array of violated constraints. Nested objects produce nested error objects. Lists produce `{ "errors": [...], "items": [...] }` where each item position is either `null` (valid) or an error object.
 
-## Companion object pattern
-
-A convenient way to expose the generated implementation:
-
-```kotlin
-@Validator
-interface UserDtoValidator {
-
-    companion object : UserDtoValidator by UserDtoValidatorImpl()
-
-    fun validate(userCreate: UserCreate): ValidationResult<UserCreate>
-
-    fun validate(userUpdate: UserUpdate): ValidationResult<UserUpdate>
-}
-```
-
-Multiple validation methods in one interface are supported. Each method must accept exactly one DTO parameter and return `ValidationResult<T>`.
-
 ## See also
 
 - [Validation](/validation/validation) — the runtime module (constraints, error types, `ValidationCall`)
-- [Advanced Validation Codegen](/validation/validation-codegen-advanced) — cross-field JSON checks, polymorphic dispatch, custom constraint descriptors
+- [Advanced Validation Codegen](/validation/validation-codegen-advanced) — the override mechanisms in depth: cross-field checks, polymorphic dispatch, object-level checks, skipping nested types, custom constraint descriptors

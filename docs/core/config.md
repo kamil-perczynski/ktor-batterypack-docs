@@ -1,166 +1,233 @@
 # Configuration
 
-`ktor-batterypack-core` loads application configuration through a single function, `loadConfig<T>`. It merges YAML files, environment variables, and JVM system properties into one instance of a Kotlin data class you define.
+`ktor-batterypack-core` provides `loadConfig<T>` — a type-safe configuration loader built on [Hoplite](https://github.com/sksamuel/hoplite). It is deliberately modeled after Spring Boot's configuration loading: a base `application.yaml`, profile-specific files layered on top, environment variables and system properties as overrides — all bound into immutable Kotlin data classes, the equivalent of Spring's `@ConfigurationProperties`.
 
-What it makes easy:
+It gives you:
 
-- Typed configuration — values arrive as fields and constructor parameters, not string-keyed lookups.
-- Per-environment overrides with profiles and environment variables, without a rebuild.
-- Fail-fast startup — a value that does not map to the declared type aborts the boot.
+- **typed config** — plain data classes with defaults, no stringly-typed lookups scattered through the codebase,
+- **profiles** — per-environment files such as `application-docker.yaml`,
+- **deployment overrides without files** — `DATABASE_URL=...` beats anything in YAML,
+- **test overrides with system properties** — the trick that wires Testcontainers into config (see below),
+- **one config bean** — the whole application derives from a single loaded instance.
 
-Profile resolution is not your job: `configureKtorServer` resolves the active profiles and hands them to your configuration lambda. Batterypack does not replace Ktor's own `application.conf` — Ktor still reads it at bootstrap, and Batterypack reads exactly one key from it: `app.profiles`.
+It does not replace Ktor's own `ApplicationConfig`. Ktor reads `ktor.deployment` and the `ktor.application.modules` list from `application.yaml` before your code runs; `loadConfig` configures everything after that. The two share the same YAML file but bind different trees — Ktor binds the `ktor` prefix, your data classes bind the rest.
 
-What it does not do: runtime reloading, value encryption, or validation beyond type mapping. The configuration is resolved once at startup; changing it means restarting the process.
+What it deliberately does not do: hot reload (config is read once at startup), remote config stores (no Consul, no config server), and per-bean config reads — that last one is a convention covered in [Dependency Injection](/core/dependency-injection).
+
+## Sources and precedence
+
+`loadConfig` merges four kinds of sources. When two of them provide the same key, the higher one wins:
+
+| Precedence | Source | Example |
+|------------|--------|---------|
+| 1 — highest | Environment variables | `DATABASE_URL` |
+| 2 | System properties | `config.override.database.url` |
+| 3 | `application-{profile}.yaml` | `application-docker.yaml` |
+| 4 — lowest | `application.yaml` | committed defaults |
+
+All file sources are optional. A missing file contributes nothing; a value absent from every source falls back to the data-class default:
+
+```kotlin
+data class DatabaseProps(
+    val url: String = "",   // used when no source provides database.url
+    val poolSize: Int = 2
+)
+```
+
+The failure modes follow from this. A missing file never breaks startup, but a value that cannot be decoded into the declared type always does: `loadConfig` throws and the server never boots. A non-nullable property with no default and no value fails the same way. Fail-fast at boot is the point — there is no partially-initialized config at runtime.
 
 ## The simplest working usage
 
-Three pieces: a data class, a YAML file, and one call.
-
-```kotlin
-data class MyConfig(
-    val app: AppProps = AppProps()
-)
-
-data class AppProps(
-    val name: String = "",
-    val port: Int = 0
-)
-```
-
-`src/main/resources/application.yaml`:
+Ktor itself requires part of the configuration to be present: without `ktor.application.modules`, the server starts, loads no module, and shuts down. So even the minimal `application.yaml` carries the `ktor` block — and the same tree binds to the core-provided `KtorProps`:
 
 ```yaml
-app:
-  name: my-app
-  port: 8080
+# application.yaml
+ktor:
+  deployment:
+    port: 8080
+  application:
+    modules:
+      - io.github.example.ApplicationKt.configureServer
 ```
-
-Load the config inside `configureKtorServer` and publish it as a Koin singleton:
 
 ```kotlin
 import io.github.ktor_batterypack.core.config.loadConfig
-import io.github.ktor_batterypack.core.configureKtorServer
-import io.ktor.server.application.Application
-import org.koin.dsl.module
+import io.github.ktor_batterypack.core.ktor.KtorProps
 
 fun Application.configureServer() {
-    configureKtorServer { ktorApp, koinApp, profiles -> // (1)
+    configureKtorServer { _, koinApp, profiles ->
         koinApp.modules(
             module {
-                single { loadConfig<MyConfig>(profiles) } // (2)
+                single { loadConfig<KtorProps>(profiles) }
             }
         )
     }
 }
 ```
 
-1. `configureKtorServer` resolves the active profiles before the container starts and passes them to your lambda.
-2. The whole configuration tree is loaded once and published as a single bean for the rest of the application to consume.
-
-At startup the server logs the resolved profiles — real output:
-
-```
-Loading application configuration with profiles: [local]
-```
-
-If a value does not map to its declared type — `port: not-a-number` — `loadConfig` throws and the application never starts. This is deliberate: a half-configured application must not accept traffic. You want the failure in the deployment log, not in the first request.
-
-## The function itself
+Any bean can now receive the props through the container:
 
 ```kotlin
-inline fun <reified T> loadConfig(
-    profiles: List<String>,
-    includeSystemProperties: Boolean = true
-): T
+val props: KtorProps // injected
+
+props.deployment.port   // 8080
 ```
 
-System properties are included by default. Pass `false` in tests when you do not want stray `-D` properties from your build tool or IDE leaking into the configuration under test:
+`profiles` selects which `application-{profile}.yaml` files participate (see below); `configureKtorServer` resolves and passes it for you. Pass `emptyList()` yourself when you want only `application.yaml` and the non-file sources. The second parameter, `includeSystemProperties`, defaults to `true` — tests that must stay immune to stray JVM flags pass `false`.
 
-```kotlin
-val config = loadConfig<TestConfig>(emptyList(), includeSystemProperties = false)
-```
+## Recommended usage: the ConfigMap pattern
 
-Every field of `T` must either have a default or be supplied by one of the sources below. A field with no default and no supplied value fails the load — which is how you make a configuration value mandatory.
-
-## Sources and precedence
-
-`loadConfig` consults sources in a fixed order. When the same key appears in several sources, the highest one wins:
-
-1. **Environment variables** — upper-case names, underscores as path separators. `APP_PORT` maps to `app.port`, `DATABASE_URL` maps to `database.url`.
-2. **JVM system properties** — read as-is: `-Dapp.port=9090`. No prefix, no namespace. Skipped entirely when `includeSystemProperties = false`.
-3. **Working-directory `application-{profile}.yaml`** — one source per active profile, later profiles first.
-4. **Classpath `application-{profile}.yaml`** — same reversed order.
-5. **Working-directory `application.yaml`**
-6. **Classpath `application.yaml`**
-
-Every YAML source is optional. An application can boot with no configuration files at all, running purely on data class defaults and environment variables.
-
-Two consequences worth internalizing:
-
-- Environment variables beat every file. A container deployment can override any key without rebuilding or remounting anything.
-- The working directory beats the classpath for the same file name. Dropping an `application.yaml` next to the jar overrides the one packaged inside it.
-
-## Profiles
-
-`configureKtorServer` resolves the active profiles before anything else:
-
-1. `app.profiles` in Ktor's `application.conf` / `application.yaml`
-2. the `APP_PROFILES` environment variable
-3. `local` if neither is set
-
-The raw value is split on commas, each entry is trimmed, and empty entries are dropped — `APP_PROFILES="local, docker"` behaves exactly like `APP_PROFILES=local,docker`.
-
-Each active profile adds an `application-{profile}.yaml` source. **The later profile wins**: with `APP_PROFILES=local,docker`, keys in `application-docker.yaml` override the same keys in `application-local.yaml`. If you expected the opposite, the reason is that the loader iterates the profile list in reverse, so later profiles land at higher precedence.
-
-Profile files only need to contain the keys that differ. A typical pair:
-
-`application.yaml`:
-
-```yaml
-app:
-  name: my-app
-  port: 8080
-```
-
-`application-docker.yaml`:
-
-```yaml
-app:
-  port: 9090
-```
-
-```bash
-APP_PROFILES=docker ./gradlew run
-```
-
-`app.name` keeps its base value `my-app`; `app.port` becomes `9090`. Keys absent from a profile file simply fall through to the lower-precedence sources.
-
-## One root class, loaded once
-
-The recommended shape is a single root data class aggregating every section of your configuration, with every field defaulted:
+A real application aggregates the props of every battery it uses into one root class, conventionally named `ConfigMap`:
 
 ```kotlin
 data class ConfigMap(
-    val app: AppProps = AppProps(),
-    val mail: MailProps = MailProps()
+    val ktor: KtorProps = KtorProps(),                   // core: port, multipart, banner
+    val database: DatabaseProps = DatabaseProps(),       // database battery
+    val redis: RedisProps = RedisProps(),                // redis battery
+    val florin: FlorinClientProps = FlorinClientProps() // your own
 )
 ```
 
-Load it once in the composition root — the `single { loadConfig<ConfigMap>(profiles) }` from the first example — and let consumers take the section they need:
+`ConfigMap` is loaded once in the composition root, inside `configureKtorServer`, and published as a single Koin bean:
 
 ```kotlin
-@Singleton
-class Mailer(config: ConfigMap) {
-    private val smtpHost = config.mail.smtpHost
+fun Application.configureServer() {
+    configureKtorServer { ktorApp, koinApp, profiles ->
+        koinApp.modules(
+            module {
+                single { loadConfig<ConfigMap>(profiles) }
+                single { ktorApp }
+            }
+        )
+        koinApp.withConfiguration<KtorFrameApp>()
+    }
 }
 ```
 
-Calling `loadConfig` per consumer instead re-reads and re-merges every source on each call: repeated file I/O per bean, and a window where two beans observe different values if the environment changed between calls. Load once, inject everywhere.
+Downstream modules publish the typed props that batteries expect:
 
-Defaulting every field has a cost: it lets the application boot with a section nobody configured. For values that must be supplied by the operator — connection strings, credentials — leave the default out, and startup fails until they exist.
+```kotlin
+@Singleton
+fun ktorProps(configMap: ConfigMap): KtorProps = configMap.ktor
+```
+
+The convention: **beans never read configuration themselves**. `loadConfig` runs once at the root; everything else receives typed props through the container. [Dependency Injection](/core/dependency-injection) covers the full wiring.
+
+## IDE autocompletion
+
+The Gradle plugin can generate a JSON schema for your `ConfigMap` (KSP option `configMetadataClass`). Referencing it from the YAML gives completion and documentation in the IDE:
+
+```yaml
+$schema: ../../../build/generated/ksp/main/resources/META-INF/config-schema.yaml
+```
+
+See the [Gradle Plugin](/gradle-plugin/) documentation.
+
+## Profiles
+
+Profiles select which `application-{profile}.yaml` files participate in the merge. They are resolved in this order:
+
+1. the `app.profiles` key in Ktor's own configuration — so, `application.yaml`,
+2. the `APP_PROFILES` environment variable,
+3. the default: `local`.
+
+The value is a comma-separated list — `local,docker` loads both files. When several profiles define the same key, the last profile in the list wins.
+
+A typical split, taken from the example application:
+
+```yaml
+# application.yaml — committed, environment-independent
+ktor:
+  deployment:
+    port: 8080
+database:
+  url: jdbc:postgresql://localhost:5432/ktordb
+```
+
+```yaml
+# application-docker.yaml — committed, docker-compose specifics
+database:
+  url: jdbc:postgresql://postgres:5432/ktordb
+redis:
+  url: redis://redis:6379
+```
+
+```yaml
+# docker-compose.yml
+ktor-batterypack:
+  environment:
+    APP_PROFILES: docker
+```
+
+`application-local.yaml` is the override valve for one machine. The convention — enforced by `.gitignore` — is that it stays uncommitted. Committing it defeats its purpose and puts machine-specific secrets into history.
+
+## Overriding without files
+
+Environment variables need no YAML at all. They are written in `UPPER_CASE_WITH_UNDERSCORES`, as in `DATABASE_URL` for `database.url`:
+
+```bash
+DATABASE_URL=jdbc:postgresql://prod-db:5432/ktordb \
+DATABASE_USER=ktor \
+java -jar app.jar
+```
+
+This is the intended way to change config in containers: the image stays identical across environments, only the environment differs.
+
+System properties work the same way behind the `config.override.` prefix:
+
+```bash
+java -Dconfig.override.database.url=jdbc:postgresql://prod-db:5432/ktordb -jar app.jar
+```
+
+Pass `includeSystemProperties = false` to `loadConfig` to switch this source off entirely.
+
+## Overriding config in tests
+
+This is what the system property mechanism is for. A Testcontainers instance chooses a random host port when it starts, so the JDBC URL it exposes **cannot live in any YAML file** — it does not exist until the container runs. System properties close the gap: set them after starting the container, and `loadConfig` picks them up above every file source.
+
+The pattern, from the example application's `KtorBatteriesIT` — the shared base of all integration tests, with containers started once per JVM:
+
+```kotlin
+companion object {
+    private val postgres = PostgresTestContainer()
+    private val redis = RedisTestContainer()
+
+    init {
+        postgres.start()
+        redis.start()
+
+        // the mapped ports exist only now — inject them as overrides
+        System.setProperty("config.override.database.url", postgres.jdbcUrl)
+        System.setProperty("config.override.database.user", postgres.username)
+        System.setProperty("config.override.database.password", postgres.password)
+        System.setProperty("config.override.redis.url", redis.redisUri)
+    }
+}
+```
+
+The test then boots the application with an explicit profile, so a developer's uncommitted `application-local.yaml` cannot leak in:
+
+```kotlin
+val builder = ApplicationTestBuilder()
+builder.environment { config = MapApplicationConfig("app.profiles" to "test") }
+builder.application {
+    configureKtorServer { ktorApp, koinApp, profiles ->
+        koinApp.modules(
+            module {
+                single { ktorApp }
+                single { loadConfig<ConfigMap>(profiles) }
+            }
+        )
+        koinApp.withConfiguration<TestKtorFrameApp>()
+    }
+}
+```
+
+The overrides must be set before the application boots — `loadConfig` reads system properties once, at load time. Skip the override and the application under test connects to the committed default — `localhost:5432` — which is either nothing or, worse, a leftover local database that makes tests pass for the wrong reason.
+
+See [Database Testing](/data/database-testing) and [Redis Testing](/redis/redis-testing) for the ready-made containers.
 
 ## Security notes
 
-- Secrets belong in environment variables. Anything written into `application.yaml` is committed and lives in git history forever.
-- Fail-fast is your safety net for missing secrets: declare a secret field without a default, and an absent environment variable aborts startup instead of serving traffic with an empty password.
-- The startup log line prints profile names only, never values. Keep it that way in your own code: do not log the configuration object.
+- Treat everything in a committed `application.yaml` as public. Production secrets belong in environment variables (`DATABASE_PASSWORD`) or the uncommitted `application-local.yaml`. A committed secret ends up in the image layers and in git history.
+- A `config.override.database.password` system property is visible in the host's process list to every user. Prefer environment variables for secrets.

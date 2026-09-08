@@ -1,14 +1,50 @@
 # Advanced Validation Codegen
 
-This page covers patterns that go beyond basic constraint checking: cross-field validation on raw JSON, polymorphic type dispatch, and custom constraint descriptors.
+Jakarta annotations validate one field at a time. This page covers the cases they cannot reach, in two parts: taking over generated methods with manual overrides — cross-field rules, polymorphic type dispatch, object-level checks, skipping a nested type — and extending the constraint vocabulary with custom constraint descriptors.
 
-You should be familiar with the basics from [Validation Codegen](/validation/validation-codegen) before reading this.
+You should be familiar with the basics from [Validation Codegen](/validation/validation-codegen), especially the two override mechanisms, before reading this.
+
+## Overriding generated methods
+
+Any method in the interface **with a body** is treated as a manual override. [Validation Codegen](/validation/validation-codegen#manual-overrides) introduced the two mechanisms:
+
+- **Replace** — a body on a method matching the generated naming convention (`validate{TypeName}`) replaces generation for that type. The generated code routes nested validation through `validate{TypeName}` methods, so a body on that exact name takes the route over. [Polymorphic dispatch](#polymorphic-dispatch) and [skipping validation](#skipping-generated-validation-for-a-nested-type) both build on this.
+- **Add** — a body on a differently named method runs after the generated checks, contributing errors to the same `ValidationCall`.
+
+### Manual method shape
+
+Override methods don't follow the entry-point shape: they don't return `ValidationResult`. They receive the value plus a `ValidationCall` — the shared error collector the generated checks also write into — and report failures with `call.propertyError(...)`. The value parameter is nullable in both flavors, `ObjectNode?` in JSON mode and the DTO type in typed mode, because the generated code invokes manual methods with `null` when a nested value is absent. An early `return` on `null` is the standard guard.
+
+### Adding extra checks alongside generation
+
+The **add** mechanism in its minimal form — a member of a `@JsonValidator` interface, reusing the `Address` DTO from [Validation Codegen](/validation/validation-codegen):
+
+```kotlin
+@ValidationParamType(Address::class)
+fun checkAddressLines(address: ObjectNode?, call: ValidationCall) {
+    val line1 = address?.get("addressLine1")?.asString(null) ?: return  // (1)
+    val line2 = address.get("addressLine2")?.asString(null) ?: return
+
+    if (line1.isNotBlank() && line2.isNotBlank() && line1 == line2) {
+        call.propertyError(
+            "addressLine1",
+            SingleConstraintError("AddressLineUnique", "Address lines must be unique")
+        )
+    }
+}
+```
+
+1. Bail out when the object or `addressLine1` is missing; the second line does the same for `addressLine2`. Missing fields are the generated checks' problem — this rule only applies when both lines are present.
+
+The generated `validateAddress` runs the Jakarta constraint checks first; then `checkAddressLines` runs alongside it, adding its error to the same `ValidationCall`.
+
+The next four sections — cross-field rules, polymorphic dispatch, object-level checks, skipping — are all applications of these two mechanisms. [Custom constraint descriptors](#custom-constraint-descriptors) stands apart: it doesn't override methods, it teaches the generator new annotations.
 
 ## Cross-field validation with `JsonTypeChecks`
 
-Jakarta annotations validate individual fields. When a rule spans multiple fields — "billing period start must be before end" — you need a method override.
+When a rule spans multiple fields — "billing period start must be before end" — no single annotation can express it. You need a method override.
 
-`JsonTypeChecks` provides typed extraction from `ObjectNode`: `checkString`, `checkLocalDate`, `checkInt`, `checkBoolean`, and others. Each returns the parsed value or `null` if the field is missing or the wrong type.
+`JsonTypeChecks`, from the [runtime module](/validation/validation#json-validation), provides typed extraction from `ObjectNode`: `checkString`, `checkLocalDate`, `checkInt`, `checkBoolean`, and others. Each returns the parsed value or `null` if the field is missing or the wrong type.
 
 ```kotlin
 @JsonValidator
@@ -44,9 +80,7 @@ interface JsonInvoiceCreateValidator {
 
 1. If either date is missing or unparseable, bail out. The generated per-field checks already report those errors.
 
-`checkBillingPeriod` is an **additional** method — the generated `validateMeteringPointPosition` still runs all Jakarta constraint checks (`@NotBlank` on `meteringPointCode`, `@NotEmpty` on `positions`, etc.). Your method runs alongside it, not instead of it.
-
-The rule for this: if your method name **does not** match the naming convention `validate{TypeName}`, it's treated as an additional check. If it **does** match, it replaces the generated method entirely.
+`checkBillingPeriod` is an **add** method. The generated `validateMeteringPointPosition` still runs all Jakarta constraint checks (`@NotBlank` on `meteringPointCode`, `@NotEmpty` on `positions`, etc.); yours runs after it, not instead of it.
 
 ## Polymorphic dispatch
 
@@ -80,11 +114,11 @@ interface InvoiceCreateValidator {
 }
 ```
 
-`validateContractParty` has a body — the generator won't touch it. Each per-subtype method has no body — the generator fills those in based on each subtype's Jakarta annotations.
+`validateContractParty` has a body and matches the `validate{TypeName}` convention — the **replace** mechanism. The generator produces no validation of its own for `ContractParty`; your dispatch is it. Each per-subtype method has no body — the generator fills those in based on each subtype's Jakarta annotations.
 
 ### JSON discriminator dispatch
 
-The same pattern works with `@JsonValidator`, using `JsonTypeChecks` to read the discriminator:
+The same replace mechanism works in a `@JsonValidator` interface. The methods below are members of one, reading the discriminator with `JsonTypeChecks`:
 
 ```kotlin
 @ValidationParamType(PersonIdentification::class)
@@ -112,7 +146,7 @@ The `else` branch reports an error for unknown discriminator values. The per-sub
 
 ## Object-level validation checks
 
-Sometimes a constraint applies to the object as a whole, not to a single field. Use `"$"` as the property name to report object-level errors:
+Sometimes a constraint applies to the object as a whole, not to a single field. In a `@Validator` interface — another **add** method — use `"$"` as the property name to report object-level errors:
 
 ```kotlin
 fun checkInvoiceCreate(invoiceCreate: InvoiceCreate?, call: ValidationCall) {
@@ -136,7 +170,7 @@ The `"$"` convention places the error at the root of the object's error map rath
 
 ## Skipping generated validation for a nested type
 
-If you provide a body for a method that matches the generated naming convention (`validate{TypeName}`), the generator skips generation entirely for that type. An empty body effectively disables validation:
+The **replace** mechanism with an empty body disables validation for a type. In JSON mode:
 
 ```kotlin
 @ValidationParamType(Address::class)
@@ -145,7 +179,7 @@ fun validateAddress(address: ObjectNode?, call: ValidationCall) {
 }
 ```
 
-If Address validation is skipped, no constraint checks will run for any Address field. This means invalid addresses will pass silently.
+The typed-mode equivalent takes `Address?` instead of `ObjectNode?`. Either way the empty body replaces generation, so no constraint checks run for any `Address` field. Invalid addresses will pass silently — make sure that is what you want.
 
 ## Custom constraint descriptors
 
@@ -162,6 +196,8 @@ ksp {
 ```
 
 Every `.yaml` file in that directory is loaded at compile time and merged with the built-in Jakarta descriptors. The processor loads your files first, then appends the Jakarta set, so both are available during generation.
+
+Reference material: the [descriptor schema](https://github.com/kamil-perczynski/ktor-batterypack/blob/main/ktor-batterypack-validation-ksp/src/main/resources/constraints-descriptor.schema.yaml) and the [built-in Jakarta descriptor file](https://github.com/kamil-perczynski/ktor-batterypack/tree/main/ktor-batterypack-validation-ksp/src/main/resources/constraints/jakarta-contraints.yaml).
 
 ### Descriptor file format
 
@@ -273,7 +309,7 @@ This generates `MyConstraints.checkIban(...)` for the first and `CreditCardConst
 
 ### What the built-in Jakarta descriptor looks like
 
-For reference, here is the built-in descriptor that ships with the generator:
+For reference, here is the built-in descriptor that ships with the generator — the one behind [Supported constraints](/validation/validation-codegen#supported-constraints):
 
 <div v-pre>
 
@@ -300,11 +336,11 @@ constraints:
 
 </div>
 
-Most entries rely on the default template. Only `NotEmpty` and `Size` override `jsonCallTpl` because their JSON validation logic differs from the typed DTO version (they operate on `JsonNode` arrays/objects instead of Kotlin collections).
+Most entries rely on the default template, which resolves to `Constraints` — the typed check implementations. Only `NotEmpty` and `Size` override `jsonCallTpl` to route to `JsonConstraints`, whose logic differs from the typed DTO version: it operates on `JsonNode` arrays and objects instead of Kotlin collections.
 
 Your custom descriptors work exactly the same way — same format, same template variables, same fallback rules.
 
 ## See also
 
-- [Validation Codegen](/validation/validation-codegen) — setup, basic usage, `@Validator` and `@JsonValidator`
+- [Validation Codegen](/validation/validation-codegen) — setup, both modes, the two override mechanisms
 - [Validation](/validation/validation) — the runtime module (constraints, error types, `ValidationCall`)

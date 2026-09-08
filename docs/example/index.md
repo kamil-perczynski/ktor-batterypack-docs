@@ -118,6 +118,8 @@ Server starts at `http://localhost:8080`.
 docker build -t ktor-batterypack-example .
 ```
 
+The packaging tasks come from the [Gradle Plugin](/gradle-plugin/).
+
 ## Integration tests
 
 Integration tests extend `KtorBatteriesIT`, which spins up shared Testcontainers PostgreSQL and Redis once per JVM. Beans are injected via `application.koin().get<...>()`.

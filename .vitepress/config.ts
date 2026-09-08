@@ -36,7 +36,7 @@ export default defineConfig({
           { text: "Overview", link: "/core/" },
           { text: "Configuration", link: "/core/config" },
           { text: "Dependency Injection", link: "/core/dependency-injection" },
-          { text: "OpenAPI Generator", link: "/core/openapi-generator" },
+          { text: "OpenAPI Generator ⭐", link: "/core/openapi-generator" },
           { text: "Controllers", link: "/core/controllers" },
           { text: "Exception Handling", link: "/core/exceptions" },
           { text: "Lifecycle", link: "/core/lifecycle" },
@@ -44,7 +44,14 @@ export default defineConfig({
           { text: "Multipart Uploads", link: "/core/multipart" },
           { text: "HTTP Client", link: "/core/http-client" },
           { text: "Health", link: "/core/health" },
-          { text: "Gradle Plugin", link: "/core/gradle-plugin" },
+        ],
+      },
+      {
+        text: "Gradle Plugin",
+        items: [
+          { text: "Overview", link: "/gradle-plugin/" },
+          { text: "Docker Distribution", link: "/gradle-plugin/docker-dist" },
+          { text: "Bootstrap Docker Files", link: "/gradle-plugin/bootstrap-docker-files" },
         ],
       },
       {
@@ -58,6 +65,9 @@ export default defineConfig({
         text: "Redis",
         items: [
           { text: "Redis", link: "/redis/" },
+          { text: "Redis Streams", link: "/redis/redis-streams" },
+          { text: "Stream Internals", link: "/redis/redis-streams-internals" },
+          { text: "Stream Monitoring", link: "/redis/redis-streams-monitoring" },
           { text: "Redis Testing", link: "/redis/redis-testing" },
         ],
       },
@@ -69,7 +79,7 @@ export default defineConfig({
         text: "Validation",
         items: [
           { text: "Validation", link: "/validation/validation" },
-          { text: "Validation Codegen", link: "/validation/validation-codegen" },
+          { text: "Validation Codegen ⭐", link: "/validation/validation-codegen" },
           {
             text: "Advanced Validation Codegen",
             link: "/validation/validation-codegen-advanced",

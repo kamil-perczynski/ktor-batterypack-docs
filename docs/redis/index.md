@@ -1,39 +1,27 @@
 # Redis
 
-`ktor-batterypack-redis` provides a Lettuce-based Redis client, plus an optional streams module for event publishing and consumption.
+`ktor-batterypack-redis` wires a [Lettuce](https://lettuce.io/) Redis client with Micrometer command latency metrics and a readiness check. On top of the client it provides a [Redis Streams](/redis/redis-streams) toolkit for publishing and consuming events between domains and services.
+
+It does not wrap pub/sub (`SUBSCRIBE`/`PUBLISH`) and ships no caching helpers. When you need plain `GET`/`SET`, distributed locks, or pub/sub, inject the underlying connection and use Lettuce directly — the batteries stay out of your way.
 
 ## What it provides
 
-- `RedisClient` and `StatefulRedisConnection<String, String>` beans.
-- `RedisProps` for typed configuration.
-- Lettuce Micrometer latency metrics.
-- Automatic cleanup of the Redis client on shutdown.
-- A `ReadinessCheck` that verifies the Redis connection.
-- `RedisStreamPublisher` for publishing messages to Redis streams.
-- `RedisStreamListener` interface for consuming messages from streams.
-- Background loops for stream fetching, autoclaim, and lag monitoring.
+- `RedisClient` with Micrometer command latency recording — every Redis command is timed, tagged, and visible in [metrics](/observability/metrics).
+- A shared `StatefulRedisConnection<String, String>` singleton.
+- A `ReadinessCheck` that pings Redis and reports `DOWN` when it is unreachable.
+- The [Redis Streams](/redis/redis-streams) toolkit: publishing, declarative listeners, consumer groups, crash recovery, and lag monitoring.
 
-## Configuration
+There are two Koin modules: `KtorBatterypackRedisModule` (the client, described on this page) and `KtorBatterypackRedisStreamsModule` (the streams machinery, which includes the base module).
 
-```yaml
-redis:
-  url: redis://localhost:6379
-  fetcher:
-    consumerPrefix: Main-
-    consumerGroup: florin
-    fetchingTimeout: 5000
-    fetchingCount: 100
-    autoclaimIntervalMs: 30000
-    autoclaimMinIdleMs: 60000
-    autoclaimCount: 10
-    lagCheckIntervalMs: 30000
-  publisher:
-    retentionMs: 7200000
+## Dependency
+
+```kotlin
+implementation("io.github.kamil-perczynski:ktor-batterypack-redis:0.0.13-alpha")
 ```
 
-## Basic client
+## Wiring
 
-Add `KtorBatterypackRedisModule` to your Koin application and expose `RedisProps`:
+Add `KtorBatterypackRedisModule` to your Koin application:
 
 ```kotlin
 @KoinApplication(
@@ -44,74 +32,67 @@ Add `KtorBatterypackRedisModule` to your Koin application and expose `RedisProps
     ]
 )
 object MyApp
+```
 
+The module expects a `RedisProps` bean from your own configuration — the same "props come from your config object" convention as [database](/data/database):
+
+```kotlin
 @Module
+@ComponentScan("com.example")
+@Configuration
 class MyAppModule {
+
     @Singleton
     fun redisProps(config: AppConfig): RedisProps = config.redis
 }
 ```
 
-Inject the connection anywhere:
+If you use streams, register `KtorBatterypackRedisStreamsModule` instead — one entry wires both. The extra moving parts are covered in [Redis Streams](/redis/redis-streams).
+
+## Configuration
+
+`RedisProps` loads from your config object:
 
 ```kotlin
-import io.lettuce.core.api.StatefulRedisConnection
-
-@Singleton
-class MyRedisClient(private val connection: StatefulRedisConnection<String, String>)
-```
-
-## Streams
-
-For event-driven communication, add `KtorBatterypackRedisStreamsModule`:
-
-```kotlin
-@KoinApplication(
-    modules = [
-        KtorBatterypackCoreModule::class,
-        KtorBatterypackRedisModule::class,
-        KtorBatterypackRedisStreamsModule::class,
-        MyAppModule::class
-    ]
+data class RedisProps(
+    val url: String = "redis://localhost:6379",
+    val fetcher: FetcherProps = FetcherProps(),
+    val publisher: PublisherProps = PublisherProps()
 )
-object MyApp
 ```
 
-### Publishing
+Example `application.yaml`:
 
-```kotlin
-import io.github.ktor_batterypack.redis.RedisStreamPublisher
-
-@Singleton
-class UserEventPublisher(private val publisher: RedisStreamPublisher) {
-
-    fun userCreated(user: User) {
-        publisher.publish(
-            stream = "user-events",
-            payload = user
-        )
-    }
-}
+```yaml
+redis:
+  url: redis://localhost:6379
 ```
 
-### Listening
+`url` defaults to `redis://localhost:6379`. This corresponds to a plain local Redis, e.g. `docker run -p 6379:6379 redis:8-alpine` or the `redis` service in the [repository's docker-compose](https://github.com/kamil-perczynski/ktor-batterypack/blob/main/docker-compose.yml).
 
-```kotlin
-import io.github.ktor_batterypack.redis.RedisStreamListener
-
-@Singleton
-class UserEventListener : RedisStreamListener {
-
-    override fun stream(): String = "user-events"
-
-    override suspend fun onMessage(payload: String, headers: Map<String, String>) {
-        // process payload
-    }
-}
-```
-
-Listeners are grouped under `RedisStreamListenerGroups.MAIN_GROUP` by default. The streams module runs background loops that fetch new messages, autoclaim stale ones, and report consumer lag metrics.
+The `fetcher` and `publisher` blocks configure stream consumption and retention. Their defaults have real consequences — two-hour retention, sixty-second reclaim delay — so they are documented with the streams, not here: see [stream configuration](/redis/redis-streams#configuration).
 
 ## Readiness check
 
-The module registers `RedisReadinessCheck` automatically, so `/actuator/health/readiness` reports the Redis status.
+The module registers a readiness check that opens a connection and sends `PING`. When Redis is unreachable, the `redis` check reports `DOWN`, which takes your container out of load-balancer rotation — see [Health](/core/health). The check does not verify streams, consumer groups, or lag; it answers exactly one question: can we reach Redis.
+
+## Direct Lettuce access
+
+Everything the toolkit does not cover is still available through the beans:
+
+```kotlin
+@Singleton
+class RateLimiter(
+    private val connection: StatefulRedisConnection<String, String>
+) {
+    fun allow(key: String): Boolean =
+        connection.sync().set(key, "1", SetArgs().nx().ex(60)) != null
+}
+```
+
+Command latency is recorded through Micrometer regardless of who issues the command, so hand-written Lettuce calls show up in your metrics like everything else.
+
+## Security notes
+
+- `redis://` sends everything in the clear. In production use `rediss://` (TLS) with credentials in the URL, e.g. `rediss://:secret@redis.internal:6379`.
+- Stream payloads become untrusted input the moment more than one service can write to your Redis. See the [stream security notes](/redis/redis-streams#security-notes).
