@@ -35,6 +35,7 @@ export default defineConfig({
         items: [
           { text: "Overview", link: "/core/" },
           { text: "Configuration", link: "/core/config" },
+          { text: "Dependency Injection", link: "/core/dependency-injection" },
           { text: "OpenAPI Generator", link: "/core/openapi-generator" },
           { text: "Controllers", link: "/core/controllers" },
           { text: "Exception Handling", link: "/core/exceptions" },

@@ -1,15 +1,19 @@
 # OpenAPI Generator
 
-The recommended way to define request and response DTOs in a Batterypack application is to describe them in an OpenAPI specification and generate Kotlin code with the [OpenAPI Generator Gradle plugin](https://openapi-generator.tech/docs/plugins/).
+The [OpenAPI Generator Gradle plugin](https://openapi-generator.tech/docs/plugins/) compiles an OpenAPI specification into Kotlin code. In a Batterypack application it is the recommended way to define request and response DTOs: you describe each payload once in YAML, and the generator writes the data classes your controllers bind to.
 
-This page starts with the simplest usage — generating DTOs and using them directly in controllers — and then adds the recommended integration with [Validation Codegen](/validation/validation-codegen) and [JsonBinder](/core/request-binding).
+Generating the DTOs makes four things easy:
 
-## Why this approach
+- one contract shared by controllers, clients, and documentation
+- data classes that already carry Jackson and Jakarta Bean Validation annotations
+- constraint annotations that [Validation Codegen](/validation/validation-codegen) turns into validator functions
+- request bodies and query parameters that [JsonBinder](/core/request-binding) validates with those functions
 
-- **Single source of truth** — the OpenAPI spec is the contract for controllers, clients, and documentation.
-- **Type-safe DTOs** — generated Kotlin data classes with Jackson annotations and Jakarta Bean Validation annotations.
-- **Runtime validation** — `ktor-batterypack-validation-ksp` generates validator functions from the Bean Validation annotations on the DTOs.
-- **Binder integration** — `JsonBinder` uses the generated validators to convert and validate request bodies and query parameters.
+This page is about the DTOs, and about validating them. Generating code enforces nothing on its own: no request is checked against a DTO until Validation Codegen generates a validator from its annotations and `JsonBinder` runs that validator on the incoming body.
+
+You can hand-write your DTOs instead. Everything after [Setup](#setup) then applies unchanged, but the contract lives in two places, and the two drift.
+
+Two things are out of scope: generating a Kotlin client, and writing the specification. The recommended `kotlin-server` generator with the `jaxrs-spec` library also emits typed JAX-RS endpoint interfaces next to the DTOs. This page does not use them.
 
 ## Setup
 
@@ -32,16 +36,16 @@ dependencies {
 }
 ```
 
-`jakarta.validation:jakarta.validation-api` and `jakarta.ws.rs:jakarta.ws.rs-api` are required because the generated DTOs reference their annotations.
+`jakarta.validation:jakarta.validation-api` and `jakarta.ws.rs:jakarta.ws.rs-api` are not optional — the generated DTOs reference their annotations, so the module fails to compile without them.
 
 ### Generator configuration
 
-Use `kotlin-server` with `jaxrs-spec`. The generator produces interfaces and DTOs; the interfaces can be ignored — the DTOs are what Batterypack consumes.
+Use `kotlin-server` with `jaxrs-spec`. The generator emits typed endpoint interfaces alongside the DTOs; this page works with the DTOs.
 
 ```kotlin
 openApiGenerate {
-    generatorName.set("kotlin-server")
-    library.set("jaxrs-spec")
+    generatorName.set("kotlin-server")     // (1)
+    library.set("jaxrs-spec")              // (1)
     generateApiDocumentation.set(false)
     inputSpec.set("$projectDir/src/main/resources/static/schema/api.yaml")
     outputDir.set("$projectDir/build/generated/openapi")
@@ -60,27 +64,26 @@ openApiGenerate {
             "allowUnicodeIdentifiers" to "true",
             "delegatePattern" to "true",
             "useTags" to "true",
-            "useJakartaEe" to "true",
-            "serializationLibrary" to "jackson",
-            "useJackson3" to "true",
+            "useJakartaEe" to "true",              // (2)
+            "serializationLibrary" to "jackson",   // (3)
+            "useJackson3" to "true",               // (3)
             "omitGradleWrapper" to "true",
             "enumPropertyNaming" to "original",
-            "useBeanValidation" to "true",
-            "openApiNullable" to "false",
+            "useBeanValidation" to "true",         // (4)
+            "openApiNullable" to "false",          // (5)
             "useCoroutines" to "true"
         )
     )
 }
 ```
 
-The most important options:
+1. The generator and library this page is written against.
+2. Emits `jakarta.*` annotations instead of `javax.*`.
+3. Generates Jackson 3 compatible DTOs, matching the shared mapper Batterypack serializes with.
+4. Emits `@NotNull`, `@Size`, `@Pattern` and friends — the input to the KSP processor.
+5. Uses nullable Kotlin types instead of `JsonNullable` wrappers.
 
-- **`generatorName="kotlin-server"` and `library="jaxrs-spec"`** — required for the recommended setup.
-- **`useJakartaEe=true`** — emits `jakarta.*` annotations instead of `javax.*`.
-- **`serializationLibrary=jackson` and `useJackson3=true`** — generates Jackson 3 compatible DTOs.
-- **`useBeanValidation=true`** — emits Jakarta Bean Validation annotations such as `@NotNull`, `@Size`, `@Pattern`, etc.
-- **`openApiNullable=false`** — avoids `JsonNullable` wrappers and uses nullable Kotlin types instead.
-- **`interfaceOnly=true` and `delegatePattern=true`** — generate JAX-RS interfaces and delegates; only the DTOs are used by Batterypack controllers.
+What breaks if you deviate from these is covered in [Configuration that matters](#configuration-that-matters).
 
 ### Source set wiring
 
@@ -94,6 +97,8 @@ sourceSets {
 }
 ```
 
+Skip this and the generated files sit in `build/` while the compiler looks elsewhere: every DTO reference fails with an unresolved reference.
+
 ### Task ordering
 
 Make Kotlin compilation run after code generation:
@@ -104,9 +109,11 @@ tasks.compileKotlin {
 }
 ```
 
-## Simplest usage
+An incremental build can pass without this line, because the sources from the previous run are still on disk. A clean build — CI, a colleague's checkout, `./gradlew clean build` — fails with unresolved references. Wire the dependency instead of relying on the ordering happening to work.
 
-Once the DTOs are generated, use them directly in controllers like any other serializable class:
+## The simplest working usage
+
+Once the DTOs are generated, use them in a controller like any other serializable class:
 
 ```kotlin
 @Singleton
@@ -123,9 +130,40 @@ class PlantController(private val plantService: PlantService) : KtorController {
 
 The shared Jackson mapper handles serialization and deserialization.
 
-## Validation Codegen Integration
+It handles nothing else. `call.receive` rejects a body that does not parse; it does not reject a 300-character plant name, because on this path nothing reads the constraint annotations. That is a reasonable trade for an internal endpoint or a prototype. For anything reachable from the internet, keep going.
 
-The recommended next step is to wire the generated DTOs to `ktor-batterypack-validation-ksp`. The processor scans classes annotated with `@Validator` or `@JsonValidator` and generates validator functions from the Bean Validation annotations on the DTO properties.
+## Recommended: validated binding with Validation Codegen
+
+Your spec already states the constraints:
+
+```yaml
+PlantCreate:
+  type: object
+  required:
+    - name
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 30
+```
+
+and the generator turns them into annotations on the DTO:
+
+```kotlin
+data class PlantCreateDto(
+    @field:Size(min = 1, max = 30) // emitted because useBeanValidation is on
+    val name: String
+)
+```
+
+Abridged — the real class also carries `@JsonProperty` for the wire name and the nullability implied by `required`.
+
+Those annotations are inert. Ktor does not read Jakarta Bean Validation annotations off a received body, so until something turns them into a check, `maxLength: 30` is documentation. Two pieces close that gap: [Validation Codegen](/validation/validation-codegen), the KSP processor that generates a validator function from the annotations, and [JsonBinder](/core/request-binding), which runs that function on the body before converting it.
+
+That is also where generating pays for itself. Hand-write the DTO and the same rule exists twice — in the spec and in a validator — and drifts the first time someone edits one of them.
+
+What follows is the hookup; the two linked pages own the details.
 
 ### Add the KSP processor
 
@@ -151,7 +189,7 @@ dependencies {
 }
 ```
 
-### Ensure KSP runs after OpenAPI generation
+### Run KSP after generation
 
 ```kotlin
 tasks.whenTaskAdded {
@@ -161,11 +199,11 @@ tasks.whenTaskAdded {
 }
 ```
 
-This guarantees that the DTOs exist before the validator generator inspects them.
+This guarantees the DTOs exist before the validator generator inspects them. Without it, KSP can run against a source directory that has not been populated yet, and the processor has nothing to read.
 
 ### Declare a validator interface
 
-Create an interface annotated with `@JsonValidator` or `@Validator` that references the generated DTOs. KSP produces a `*Validator` class with `check*` methods that take and return a Jackson `JsonNode`.
+Create an interface annotated with `@JsonValidator` or `@Validator` that references the generated DTOs, with one method per DTO you want validated:
 
 ```kotlin
 import io.github.ktor_batterypack.annotation.JsonValidator
@@ -176,7 +214,9 @@ interface PlantApiValidator {
 }
 ```
 
-### Use the generated validator with JsonBinder
+KSP generates the implementation. The functions `JsonBinder` consumes work on the raw payload: they take a Jackson `JsonNode`, check it against the constraints, and hand back the validated node for conversion to `PlantCreateDto`. [Request Binding](/core/request-binding) describes that flow in detail.
+
+### Bind and validate
 
 Inject the generated validator into the controller and pass it to `JsonBinder`:
 
@@ -184,7 +224,8 @@ Inject the generated validator into the controller and pass it to `JsonBinder`:
 @Singleton
 class PlantController(
     private val jsonBinder: JsonBinder,
-    private val plantApiValidator: PlantApiValidator
+    private val plantApiValidator: PlantApiValidator,
+    private val plantService: PlantService
 ) : KtorController {
 
     override fun register(routing: Routing) {
@@ -199,54 +240,59 @@ class PlantController(
 }
 ```
 
-`bindBody` validates the incoming JSON against the OpenAPI-defined constraints and converts the validated node to the generated DTO. The same pattern works for query parameters with `bindQueryParams`.
+`bindBody` validates the incoming JSON against the constraints defined in the spec, then converts the validated node to the generated DTO. A body that fails never reaches `plantService`: it becomes a 400 response describing the offending fields.
 
-See [Validation Codegen](/validation/validation-codegen) for the full KSP setup, including how to register custom constraints.
-
-## Advanced Usage
-
-### Custom annotations in generated DTOs
-
-The default OpenAPI Generator does not pass custom OpenAPI extensions through to the generated Kotlin code. If you need custom validation annotations (or any other annotations) on generated DTO properties, provide custom Mustache templates that emit `vendorExtensions.x-extra-annotations`.
-
-Add `templateDir` to the generator configuration:
+Query parameters follow the same pattern:
 
 ```kotlin
-openApiGenerate {
-    // ... other options
-    templateDir.set("$projectDir/src/main/resources/templateDir")
+routing.get("/api/plants") {
+    val params = jsonBinder.bindQueryParams<ListPlantsParamsDto>(
+        call,
+        plantApiValidator::checkListPlantsParamsDto
+    )
+    call.respond(plantService.findAll(params))
 }
 ```
 
-The example application overrides the property templates to emit optional and required annotations:
+See [Validation Codegen](/validation/validation-codegen) for the full KSP setup, including how to register custom constraints.
 
-`data_class_opt_var.mustache`:
+## Configuration that matters
 
-```mustache
-{{#description}}
-    /* {{{.}}} */
-{{/description}}
-@JsonProperty("{{#lambda.escapeDollar}}{{baseName}}{{/lambda.escapeDollar}}")
-{{#vendorExtensions.x-extra-annotations}}
-    {{{.}}}
-{{/vendorExtensions.x-extra-annotations}}
-{{#useBeanValidation}}{{>beanValidation}}{{>beanValidationModel}}{{/useBeanValidation}}     {{>modelMutable}} {{{name}}}: {{#isEnum}}{{classname}}.{{nameInPascalCase}}{{/isEnum}}{{^isEnum}}{{{dataType}}}{{/isEnum}}? = {{{defaultValue}}}{{^defaultValue}}null{{/defaultValue}}
-```
+Most of the options in the [generator block](#generator-configuration) shape the generated endpoint interfaces and the Gradle output around them rather than the DTOs. These are the ones that change the code you compile against.
 
-`data_class_req_var.mustache`:
+| Option | If you change it |
+|--------|------------------|
+| `generatorName` / `library` (1) | You get different annotations, different nullability handling, and a different output layout. The rest of this page assumes `kotlin-server` + `jaxrs-spec`. |
+| `useJakartaEe` (2) | The DTOs import `javax.validation.*`, which is not the API on your classpath, and compilation fails on unresolved references. |
+| `serializationLibrary` / `useJackson3` (3) | The DTO annotations describe a mapper other than the one Batterypack uses, so property naming and defaults stop matching what happens on the wire. |
+| `useBeanValidation` (4) | No constraint annotations are emitted, so the KSP processor has nothing to read and `JsonBinder` accepts any body that parses. |
+| `openApiNullable` (5) | Optional properties become `JsonNullable<T>` wrappers instead of `T?`, and every caller has to unwrap them. |
+| `modelPackage` / `modelNameSuffix` | Your spec names and your Kotlin names stop being distinguishable — `PlantCreate` in the spec and `PlantCreate` in your domain model. |
+| `typeMappings` | Applies to every occurrence of the mapped type. `double` → `BigDecimal` changes the property type across all DTOs, so services and tests passing `Double` no longer compile. |
+| `enumPropertyNaming` | Enum constant names are derived differently from the spec, which renames constants that your Kotlin code already references. |
 
-```mustache
-{{#description}}
-    /* {{{.}}} */
-{{/description}}
-@JsonProperty("{{#lambda.escapeDollar}}{{baseName}}{{/lambda.escapeDollar}}")
-{{#vendorExtensions.x-extra-annotations}}
-    {{{.}}}
-{{/vendorExtensions.x-extra-annotations}}
-{{#useBeanValidation}}{{>beanValidation}}{{>beanValidationModel}}{{/useBeanValidation}}    {{>modelMutable}} {{{name}}}: {{#isEnum}}{{classname}}.{{nameInPascalCase}}{{/isEnum}}{{^isEnum}}{{{dataType}}}{{/isEnum}}
-```
+The remaining options — `interfaceOnly`, `delegatePattern`, `useTags`, `auth`, `useCoroutines`, `allowUnicodeIdentifiers`, `apiPackage`, `omitGradleWrapper`, `generateApiDocumentation` — shape the generated endpoint interfaces and the build output rather than the DTOs. `interfaceOnly` and `delegatePattern` decide what form those interfaces take; `generateApiDocumentation=false` and `omitGradleWrapper=true` keep documentation and a second Gradle wrapper out of the output directory.
 
-Then declare the annotation in the OpenAPI spec:
+The generator has many more options; we won't list them here. Consult the [OpenAPI Generator documentation](https://openapi-generator.tech/docs/generators/kotlin-server) for the full set.
+
+## Advanced: custom annotations in generated DTOs
+
+Sooner or later you need a validation rule that OpenAPI cannot express, and you still want it enforced at runtime like every other constraint. This section shows how to carry your own annotation from the specification into a generated DTO, and how to make Batterypack check requests against it.
+
+The running example is one annotation on one property: `@Email` on `notifyEmail`, a field of the `CareTaskSnoozeRequest` schema below. OpenAPI can express the 30-character limit that sits beside it; it has no keyword for "must be a valid email address".
+
+Two tools are involved, so there are two steps:
+
+1. **Extend the OpenAPI Generator templates**, so that `@Email` survives code generation and lands on the DTO property.
+2. **Register `@Email` with [Validation Codegen](/validation/validation-codegen)**, so that it is enforced when a request arrives.
+
+Each step fails silently without the other. Skip the first and the annotation never appears on the DTO; skip the second and it appears and nothing checks it. Both states compile.
+
+### Extend the templates
+
+OpenAPI Generator reads unknown `x-` keys into a `vendorExtensions` map, but a Mustache template only emits what it explicitly references, and the stock Kotlin property templates do not reference yours. The extension is parsed, held in memory, and dropped.
+
+So the annotation is declared in the spec, as an extension on the property:
 
 ```yaml
 CareTaskSnoozeRequest:
@@ -266,4 +312,60 @@ CareTaskSnoozeRequest:
       maximum: 30
 ```
 
-For the validation KSP processor to recognize the custom annotation, register it in a constraint descriptor. See [Validation Codegen](/validation/validation-codegen) for details.
+The value is a literal block, so several annotations can be stacked one per line, and the fully qualified name saves you from teaching the template to emit imports.
+
+Point the generator at your own templates:
+
+```kotlin
+openApiGenerate {
+    // ... other options
+    templateDir.set("$projectDir/src/main/resources/templateDir")
+}
+```
+
+Overrides work by filename — the generator looks here first and falls back to its bundled templates for everything you did not supply — so you copy only the two files you are changing.
+
+`notifyEmail` is optional, which routes it through `data_class_opt_var.mustache`; required properties go through `data_class_req_var.mustache`. Extend both, starting from the bundled versions:
+
+```mustache
+{{#description}}
+    /* {{{.}}} */
+{{/description}}
+@JsonProperty("{{#lambda.escapeDollar}}{{baseName}}{{/lambda.escapeDollar}}")
+{{#vendorExtensions.x-extra-annotations}}
+    {{{.}}}
+{{/vendorExtensions.x-extra-annotations}}
+{{#useBeanValidation}}{{>beanValidation}}{{>beanValidationModel}}{{/useBeanValidation}}     {{>modelMutable}} {{{name}}}: {{#isEnum}}{{classname}}.{{nameInPascalCase}}{{/isEnum}}{{^isEnum}}{{{dataType}}}{{/isEnum}}? = {{{defaultValue}}}{{^defaultValue}}null{{/defaultValue}}
+```
+
+`data_class_opt_var.mustache`, which renders optional properties. `data_class_req_var.mustache` is identical apart from the trailing declaration, where required properties get neither the `?` nor the default:
+
+```mustache
+{{#description}}
+    /* {{{.}}} */
+{{/description}}
+@JsonProperty("{{#lambda.escapeDollar}}{{baseName}}{{/lambda.escapeDollar}}")
+{{#vendorExtensions.x-extra-annotations}}
+    {{{.}}}
+{{/vendorExtensions.x-extra-annotations}}
+{{#useBeanValidation}}{{>beanValidation}}{{>beanValidationModel}}{{/useBeanValidation}}    {{>modelMutable}} {{{name}}}: {{#isEnum}}{{classname}}.{{nameInPascalCase}}{{/isEnum}}{{^isEnum}}{{{dataType}}}{{/isEnum}}
+```
+
+The `vendorExtensions` section is the entire addition; everything around it is the stock template. Two details in it matter:
+
+- The triple braces in <code v-pre>{{{.}}}</code> print the annotation verbatim. Double braces would escape it.
+- <code v-pre>{{>beanValidation}}</code> and <code v-pre>{{>beanValidationModel}}</code> emit the standard Jakarta constraints. Drop them and you gain your custom annotation while losing every `@Size` and `@NotNull` on the property.
+
+The same mechanism carries any `x-` extension, not just annotations.
+
+### Register the annotation with Validation Codegen
+
+An annotation on a DTO does nothing until the KSP processor knows what to do with it. Register it in a constraint descriptor, as described in [Validation Codegen](/validation/validation-codegen).
+
+Then confirm it with a request that breaks the rule. A successful build tells you the annotation is on the class, not that anything enforces it.
+
+## Security notes
+
+- The spec is not an enforcement mechanism. Constraints become runtime checks only through the generated annotations, the KSP processor, and `JsonBinder`. A route that calls `call.receive<PlantCreateDto>()` instead of `bindBody` skips validation entirely, and nothing in the build tells you.
+- Custom annotations are inert until they are registered as constraint descriptors. Confirm enforcement with a request that violates the rule, not with a green build.
+- Map precision-sensitive numbers deliberately. `typeMappings` with `double` → `java.math.BigDecimal` applies to every `double` in the spec, which is what you want for money and usually not what you want for measurements.

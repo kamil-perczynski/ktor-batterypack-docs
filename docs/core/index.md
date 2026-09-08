@@ -7,6 +7,7 @@
 | Topic | Purpose |
 |-------|---------|
 | [Configuration](/core/config) | Type-safe config loading via Hoplite from YAML, environment variables, system properties, and active profiles |
+| [Dependency Injection](/core/dependency-injection) | Koin annotation-based DI, component scanning, config wiring, and lifecycle hooks |
 | [OpenAPI Generator](/core/openapi-generator) | Recommended setup for generating DTOs from an OpenAPI spec and wiring them to validation and JsonBinder |
 | [Controllers](/core/controllers) | `KtorController` interface for route classes that are discovered and registered automatically |
 | [Exception Handling](/core/exceptions) | RFC 7807 `ProblemDetail` responses for validation, business, and unexpected errors |
