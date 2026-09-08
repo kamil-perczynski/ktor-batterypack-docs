@@ -3,7 +3,7 @@ import { defineConfig } from "vitepress";
 // https://vitepress.dev/reference/site-config
 export default defineConfig({
   srcDir: "docs",
-  base: "/ktor-batterypack-docs/",
+  base: "/",
   appearance: "force-dark",
 
   title: "Ktor/ Batterypack",
@@ -14,7 +14,7 @@ export default defineConfig({
 
     nav: [
       { text: "Home", link: "/" },
-      { text: "Table of Contents", link: "/table-of-contents" },
+      { text: "Get Started", link: "/introduction/get-started" },
       {
         text: "0.0.13-alpha",
         link: "https://github.com/kamil-perczynski/ktor-batterypack/releases/tag/0.0.13-alpha",
@@ -27,21 +27,53 @@ export default defineConfig({
 
     sidebar: [
       {
-        text: "Overview",
-        items: [{ text: "Table of Contents", link: "/table-of-contents" }],
+        text: "Introduction",
+        items: [{ text: "Get Started", link: "/introduction/get-started" }],
       },
       {
-        text: "Modules",
+        text: "Core",
         items: [
-          { text: "Core", link: "/table-of-contents" },
-          { text: "Database", link: "/table-of-contents" },
-          { text: "Metrics", link: "/table-of-contents" },
-          { text: "Redis", link: "/table-of-contents" },
-          { text: "Validation", link: "/table-of-contents" },
-          { text: "Annotations", link: "/table-of-contents" },
-          { text: "Gradle Plugin", link: "/table-of-contents" },
-          { text: "Example", link: "/table-of-contents" },
+          { text: "Overview", link: "/core/" },
+          { text: "Configuration", link: "/core/config" },
+          { text: "OpenAPI Generator", link: "/core/openapi-generator" },
+          { text: "Controllers", link: "/core/controllers" },
+          { text: "Exception Handling", link: "/core/exceptions" },
+          { text: "Lifecycle", link: "/core/lifecycle" },
+          { text: "Request Binding", link: "/core/request-binding" },
+          { text: "Multipart Uploads", link: "/core/multipart" },
+          { text: "HTTP Client", link: "/core/http-client" },
+          { text: "Health", link: "/core/health" },
+          { text: "Gradle Plugin", link: "/core/gradle-plugin" },
         ],
+      },
+      {
+        text: "Data",
+        items: [
+          { text: "Database", link: "/data/database" },
+          { text: "Database Testing", link: "/data/database-testing" },
+        ],
+      },
+      {
+        text: "Redis",
+        items: [
+          { text: "Redis", link: "/redis/" },
+          { text: "Redis Testing", link: "/redis/redis-testing" },
+        ],
+      },
+      {
+        text: "Observability",
+        items: [{ text: "Metrics", link: "/observability/metrics" }],
+      },
+      {
+        text: "Validation",
+        items: [
+          { text: "Validation", link: "/validation/validation" },
+          { text: "Validation Codegen", link: "/validation/validation-codegen" },
+        ],
+      },
+      {
+        text: "Example Application",
+        items: [{ text: "Example", link: "/example/" }],
       },
     ],
 

@@ -11,7 +11,7 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /table-of-contents
+      link: /introduction/get-started
     - theme: alt
       text: GitHub
       link: https://github.com/kamil-perczynski/ktor-batterypack
@@ -47,9 +47,8 @@ Ktor Batterypack is a collection of opinionated Kotlin libraries that solve comm
 | `ktor-batterypack-metrics` | Micrometer + Prometheus |
 | `ktor-batterypack-redis` | Lettuce Redis client |
 | `ktor-batterypack-redis-testing` | Testcontainers Redis helper |
-| `ktor-batterypack-validation` | Konform-based request validation |
-| `ktor-batterypack-validation-ksp` | KSP processor for validators |
-| `ktor-batterypack-annotations` | Shared annotations |
+| `ktor-batterypack-validation` | Runtime validation utilities and constraint helpers |
+| `ktor-batterypack-validation-ksp` | KSP code generator for validators |
 | `ktor-batterypack-gradle-plugin` | Docker packaging tasks |
 | `ktor-batterypack-example` | Example application |
 

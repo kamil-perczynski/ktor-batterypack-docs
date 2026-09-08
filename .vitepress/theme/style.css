@@ -129,23 +129,8 @@
   --vp-custom-block-tip-code-bg: var(--vp-c-brand-soft);
 }
 
-/**
- * Component: Hero Image
- * -------------------------------------------------------------------------- */
-
-.VPHero .image {
-  max-width: 360px;
-}
-
-@media (min-width: 640px) {
+@media (min-width: 60rem) {
   .VPHero .image {
-    max-width: 420px;
+    height: 18rem;
   }
 }
-
-@media (min-width: 960px) {
-  .VPHero .image {
-    max-width: 480px;
-  }
-}
-

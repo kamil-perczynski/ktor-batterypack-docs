@@ -55,7 +55,6 @@ You can also trigger a deployment manually from the **Actions** tab.
 │   └── theme/                    # Custom theme assets
 ├── docs/
 │   ├── index.md                  # Homepage
-│   ├── table-of-contents.md
 │   └── public/                   # Static assets (icons, images)
 ├── package.json
 ├── tsconfig.json
