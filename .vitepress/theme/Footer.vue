@@ -2,7 +2,7 @@
   <footer class="custom-footer">
     <div class="footer-grid">
       <div class="footer-brand">
-        <img src="/ktor-batterypack-docs/icon-x.webp" alt="Ktor Batterypack icon" width="48" height="48" />
+        <img :src="withBase('/icon-x.webp')" alt="Ktor Batterypack icon" width="48" height="48" />
         <span class="footer-title">Ktor/ Batterypack</span>
         <div class="footer-social">
           <a href="https://x.com/" target="_blank" rel="noopener noreferrer" aria-label="X">
@@ -91,6 +91,8 @@
 </template>
 
 <script setup lang="ts">
+import { withBase } from 'vitepress'
+
 const groups = {
   core: [
     'ktor-batterypack-core',
