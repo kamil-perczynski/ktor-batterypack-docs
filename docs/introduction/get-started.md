@@ -159,5 +159,5 @@ Your application now exposes:
 ## Next steps
 
 - Read the [Core](/core/) module documentation for details on configuration, controllers, lifecycle, and more.
-- Add the [Database](/data/database/), [Redis](/redis/), [Metrics](/observability/metrics/), or [Validation](/validation/validation/) modules when you need them.
+- Add the [Database](/data/database), [Redis](/redis/), [Metrics](/observability/metrics), or [Validation](/validation/validation) modules when you need them.
 - Check the [Example Application](/example/) for a complete working project.
