@@ -66,7 +66,16 @@ export default defineConfig({
         items: [
           { text: "Redis", link: "/redis/" },
           { text: "Redis Streams", link: "/redis/redis-streams" },
-          { text: "Stream Internals", link: "/redis/redis-streams-internals" },
+          {
+            text: "Stream Internals",
+            link: "/redis/redis-streams-internals",
+            collapsed: false,
+            items: [
+              { text: "Bootstrap & Shutdown", link: "/redis/stream-diagram-boot" },
+              { text: "Publish", link: "/redis/stream-diagram-publish" },
+              { text: "Consume", link: "/redis/stream-diagram-consume" },
+            ],
+          },
           { text: "Stream Monitoring", link: "/redis/redis-streams-monitoring" },
           { text: "Redis Testing", link: "/redis/redis-testing" },
         ],

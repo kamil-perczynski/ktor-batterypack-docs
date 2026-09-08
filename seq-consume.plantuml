@@ -1,0 +1,49 @@
+@startuml
+!theme plain
+scale 1.5
+
+participant "Fetching Loop" as Fetch
+participant "Autoclaim Loop" as Claim
+participant "Lag Monitor" as Lag
+participant "Redis" as Redis
+participant "Processor" as Proc
+participant "Listener" as Lsn
+participant "Metrics" as Met
+
+== New Messages ==
+
+Fetch -> Redis: XREADGROUP (block)
+Redis --> Fetch: messages
+
+Fetch -> Proc: process batch
+activate Proc
+
+Proc -> Lsn: onMessage(payload, headers)
+activate Lsn
+Lsn --> Proc: handled
+
+deactivate Lsn
+
+Proc -> Met: record duration
+Proc -> Redis: XACK
+
+deactivate Proc
+
+== Crash Recovery ==
+
+Claim -> Redis: XAUTOCLAIM (idle > min)
+Redis --> Claim: orphaned messages
+
+Claim -> Met: reclaimed count
+Claim -> Proc: process batch
+Proc -> Lsn: onMessage
+Proc -> Redis: XACK
+
+== Health Sampling ==
+
+Lag -> Redis: XINFO CONSUMERS
+Redis --> Lag: pending, idle, inactive
+
+Lag -> Met: publish gauges
+
+@enduml

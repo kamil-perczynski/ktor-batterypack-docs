@@ -1,0 +1,19 @@
+@startuml
+!theme plain
+scale 1.5
+
+participant "Application" as App
+participant "RedisStreamPublisher" as Pub
+participant "Redis" as Redis
+
+App -> Pub: publish(event, headers)
+activate Pub
+
+Pub -> Pub: serialize to JSON
+Pub -> Redis: XADD stream _p=json headers...
+Redis --> Pub: message id
+
+Pub --> App: message id
+deactivate Pub
+
+@enduml

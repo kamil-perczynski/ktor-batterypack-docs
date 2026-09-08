@@ -1,0 +1,45 @@
+@startuml
+!theme plain
+scale 1.5
+
+participant "Application" as App
+participant "RedisStreamFetcher" as Fetcher
+participant "Redis" as Redis
+participant "Background Loops" as Loops
+
+== Bootstrap ==
+
+App -> Fetcher: startup
+activate Fetcher
+
+note right
+    Runs before the server
+    accepts traffic
+end note
+
+Fetcher -> Redis: XINFO CONSUMERS
+Redis --> Fetcher: consumer info
+
+Fetcher -> Redis: clean up idle dead consumers
+Fetcher -> Redis: XGROUP CREATE ... MKSTREAM
+Redis --> Fetcher: OK / BUSYGROUP
+
+Fetcher -> Loops: start fetching, autoclaim, lag monitor
+activate Loops
+
+Fetcher --> App: ready
+
+deactivate Fetcher
+
+== Shutdown ==
+
+App -> Fetcher: close
+activate Fetcher
+
+Fetcher -> Loops: cancel all loops
+destroy Loops
+
+Fetcher --> App: closed
+deactivate Fetcher
+
+@enduml
