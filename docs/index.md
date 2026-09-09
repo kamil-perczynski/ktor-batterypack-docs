@@ -13,6 +13,9 @@ hero:
       text: Get started
       link: /introduction/get-started
     - theme: alt
+      text: What is Batterypack?
+      link: /introduction/what-is-batterypack
+    - theme: alt
       text: GitHub
       link: https://github.com/kamil-perczynski/ktor-batterypack
 
@@ -25,6 +28,7 @@ features:
     details: Controller auto-registration, global exception handling, RFC 7807 ProblemDetail responses, and multipart support.
   - title: Kubernetes ready
     details: Layered Docker images, health endpoints, Prometheus metrics, and stateless design make it ready to deploy on container orchestrators.
+    link: /introduction/cloud-native
   - title: Redis
     details: Lettuce-based Redis client for caching and events, plus Testcontainers support for integration tests.
   - title: Validation
@@ -35,21 +39,6 @@ features:
 
 ## What is Ktor Batterypack?
 
-Ktor Batterypack is a collection of opinionated Kotlin libraries that solve common backend concerns so you can focus on domain logic. It includes modules for configuration, dependency injection, HTTP routing, database access, Redis, metrics, validation, testing helpers, and Docker packaging.
+A collection of opinionated Kotlin libraries that wire the cross-cutting concerns of a Ktor backend — configuration, DI, error responses, health probes, database, Redis, metrics, validation, testing helpers, and Docker packaging — so your application stays focused on domain logic.
 
-## Modules at a Glance
-
-| Module | Purpose |
-|--------|---------|
-| `ktor-batterypack-core` | Bootstrap, config, health, exceptions, DI lifecycle, Jackson, and controller auto-registration |
-| `ktor-batterypack-database` | Exposed + Hikari + monitored transactions |
-| `ktor-batterypack-database-testing` | Testcontainers PostgreSQL helper |
-| `ktor-batterypack-metrics` | Micrometer + Prometheus |
-| `ktor-batterypack-redis` | Lettuce Redis client |
-| `ktor-batterypack-redis-testing` | Testcontainers Redis helper |
-| `ktor-batterypack-validation` | Runtime validation utilities and constraint helpers |
-| `ktor-batterypack-validation-ksp` | KSP code generator for validators |
-| `ktor-batterypack-gradle-plugin` | Docker packaging tasks |
-| `ktor-batterypack-example` | Example application |
-
-Each module is published independently, so you can include only the batteries you need.
+Read [What is Batterypack](/introduction/what-is-batterypack) for the full story, browse [Modules at a Glance](/introduction/modules) for the map, or dive into [How it Works](/introduction/how-it-works) for the mental model.

@@ -1,6 +1,12 @@
 # OpenAPI Generator
 
-The [OpenAPI Generator Gradle plugin](https://openapi-generator.tech/docs/plugins/) compiles an OpenAPI specification into Kotlin code. In a Batterypack application it is the recommended way to define request and response DTOs: you describe each payload once in YAML, and the generator writes the data classes your controllers bind to.
+The [OpenAPI Generator Gradle plugin](https://openapi-generator.tech/docs/plugins/) compiles an OpenAPI specification into Kotlin code. 
+
+
+It is **strongly recommended way** to define endpoints, requests and response DTOs in a Batterypack application.
+
+You describe each payload once in YAML, and the generator writes the data classes your controllers bind to.
+
 
 Generating the DTOs makes four things easy:
 

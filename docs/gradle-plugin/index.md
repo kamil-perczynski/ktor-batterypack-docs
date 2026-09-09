@@ -23,7 +23,7 @@ pluginManagement {
     repositories {
         maven {
             name = "KtorBatterypackMaven"
-            url = uri("https://repo.repsy.io/ktor-baterrypack/maven")
+            url = uri("https://repo.repsy.io/ktor-batterypack/maven")
         }
         mavenCentral()
         gradlePluginPortal()
@@ -31,7 +31,7 @@ pluginManagement {
 }
 ```
 
-Apply the plugin in your module's `build.gradle.kts` — via the version catalog, or with an explicit version:
+Apply the plugin in your module's `build.gradle.kts` — via the [version catalog](/version-catalog/), or with an explicit version:
 
 ```kotlin
 plugins {

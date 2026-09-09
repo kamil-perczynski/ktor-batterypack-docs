@@ -1,8 +1,8 @@
 # Get Started
 
-Ktor Batterypack is a set of opinionated Kotlin libraries that wire common backend concerns into a Ktor application so you can focus on domain code. The **Core** module is the entry point: it bootstraps the server, installs Koin, Jackson content negotiation, global exception handling, and auto-discovers your route controllers.
+New to Batterypack? Read [What is Batterypack](/introduction/what-is-batterypack) first — the why, the opinions, and the honest costs. This page is the hands-on part.
 
-This guide shows how to add the Core module to a new Ktor project and write your first controller.
+The **Core** module is the entry point: it bootstraps the server, installs Koin, Jackson content negotiation, global exception handling, and auto-discovers your route controllers. This guide shows how to add it to a new Ktor project and write your first controller.
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ pluginManagement {
     repositories {
         maven {
             name = "KtorBatterypackMaven"
-            url = uri("https://repo.repsy.io/ktor-baterrypack/maven")
+            url = uri("https://repo.repsy.io/ktor-batterypack/maven")
         }
         mavenCentral()
         gradlePluginPortal()
@@ -26,7 +26,7 @@ dependencyResolutionManagement {
     repositories {
         maven {
             name = "KtorBatterypackMaven"
-            url = uri("https://repo.repsy.io/ktor-baterrypack/maven")
+            url = uri("https://repo.repsy.io/ktor-batterypack/maven")
         }
         mavenCentral()
     }
@@ -35,6 +35,8 @@ dependencyResolutionManagement {
     }
 }
 ```
+
+The catalog pins every battery and the stack it was tested against — see [Version Catalog](/version-catalog/) for what that buys you and how to use it well.
 
 ### 2. Apply plugins and add the Core dependency
 

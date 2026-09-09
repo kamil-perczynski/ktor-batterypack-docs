@@ -28,7 +28,17 @@ export default defineConfig({
     sidebar: [
       {
         text: "Introduction",
-        items: [{ text: "Get Started", link: "/introduction/get-started" }],
+        items: [
+          { text: "What is Batterypack", link: "/introduction/what-is-batterypack" },
+          { text: "Modules at a Glance", link: "/introduction/modules" },
+          { text: "How it Works", link: "/introduction/how-it-works" },
+          { text: "Cloud Native", link: "/introduction/cloud-native" },
+          { text: "Get Started", link: "/introduction/get-started" },
+        ],
+      },
+      {
+        text: "Version Catalog",
+        items: [{ text: "Overview", link: "/version-catalog/" }],
       },
       {
         text: "Core",
