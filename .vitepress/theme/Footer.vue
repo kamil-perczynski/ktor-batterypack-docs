@@ -109,7 +109,10 @@ const groups = {
 
 <style scoped>
 .custom-footer {
-  max-width: var(--vp-layout-max-width);
+  container-type: inline-size;
+  container-name: footer;
+  width: 100%;
+  max-width: 72rem;
   margin: 0 auto;
   padding: 3rem 24px 2rem;
   border-top: 1px solid var(--vp-c-divider);
@@ -119,7 +122,7 @@ const groups = {
 
 .footer-grid {
   display: grid;
-  grid-template-columns: 1.5fr repeat(5, 1fr);
+  grid-template-columns: 1.25fr repeat(3, 1fr);
   gap: 2rem;
   align-items: start;
 }
@@ -129,6 +132,7 @@ const groups = {
   flex-direction: column;
   align-items: flex-start;
   gap: 0.75rem;
+  grid-row: 1 / span 2;
 }
 
 .footer-brand img {
@@ -200,24 +204,19 @@ const groups = {
   margin: 0;
 }
 
-@media (max-width: 960px) {
+@container footer (max-width: 960px) {
   .footer-grid {
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 2rem 1.5rem;
   }
 
   .footer-brand {
     grid-column: 1 / -1;
+    grid-row: auto;
   }
 }
 
-@media (max-width: 640px) {
-  .footer-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 480px) {
+@container footer (max-width: 480px) {
   .footer-grid {
     grid-template-columns: 1fr;
   }

@@ -134,3 +134,9 @@
     height: 18rem;
   }
 }
+
+/* On doc pages the footer is rendered via the doc-bottom slot; hide the
+   duplicate layout-bottom footer so it doesn't overlap the sidebar. */
+.VPContent.has-sidebar ~ .custom-footer {
+  display: none;
+}

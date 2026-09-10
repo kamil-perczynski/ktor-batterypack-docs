@@ -10,7 +10,8 @@ export default {
   Layout: () => {
     return h(DefaultTheme.Layout, null, {
       // https://vitepress.dev/guide/extending-default-theme#layout-slots
-      'layout-bottom': () => h(Footer)
+      'doc-bottom': () => h(Footer),
+      'layout-bottom': () => h(Footer),
     })
   },
   enhanceApp({ app, router, siteData }) {
