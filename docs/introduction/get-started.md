@@ -46,7 +46,7 @@ In your module `build.gradle.kts`:
 plugins {
     alias(batterypackLibs.plugins.kotlin.jvm)
     alias(batterypackLibs.plugins.koin.compiler)
-    application
+    alias(batterypackLibs.plugins.ktor.batterypack)
 }
 
 dependencies {
@@ -58,30 +58,27 @@ The Koin compiler plugin is required because Batterypack uses Koin annotations f
 
 ### 3. Create a Koin application module
 
-Define a Koin module that includes `KtorBatterypackCoreModule` and scans your package for `@Singleton` controllers:
+Declare the Koin application. `MyApp` is the object that lists the modules making up your app — here just the core battery's `KtorBatterypackCoreModule`:
 
 ```kotlin
 import io.github.ktor_batterypack.core.KtorBatterypackCoreModule
-import org.koin.core.annotation.ComponentScan
-import org.koin.core.annotation.Configuration
 import org.koin.core.annotation.KoinApplication
-import org.koin.core.annotation.Module
 
-@KoinApplication(
-    modules = [
-        KtorBatterypackCoreModule::class,
-        MyAppModule::class
-    ]
-)
+@KoinApplication(modules = [KtorBatterypackCoreModule::class])
 object MyApp
-
-@Module
-@ComponentScan("com.example.myapp")
-@Configuration
-class MyAppModule
 ```
 
 ### 4. Configure the Ktor server
+
+`MyConfig` is your application's root configuration class — a data class whose shape mirrors the `application.yaml` added in step 6. `loadConfig` binds the YAML tree into it. With only Core installed it wraps the core-provided `KtorProps`; every battery you add later contributes its own props class to this root (see [Configuration](/core/config)):
+
+```kotlin
+import io.github.ktor_batterypack.core.ktor.KtorProps
+
+data class MyConfig(
+    val ktor: KtorProps = KtorProps()
+)
+```
 
 Use `configureKtorServer` in your `Application` module. The lambda receives the Ktor application, the Koin application, and the resolved active profiles:
 
@@ -104,6 +101,8 @@ fun Application.configureServer() {
     }
 }
 ```
+
+`withConfiguration<MyApp>()` hooks in the composition generated from the `@KoinApplication` object declared in step 3: `KtorBatterypackCoreModule` lands in the container.
 
 ### 5. Write a controller
 
@@ -132,6 +131,8 @@ class HelloController : KtorController {
 Create `src/main/resources/application.yaml`:
 
 ```yaml
+$schema: ../../../build/generated/ksp/main/resources/META-INF/config-schema.yaml
+
 app:
   profiles: local
 
@@ -142,7 +143,7 @@ ktor:
     MyApp started
 ```
 
-Active profiles are read from `app.profiles` or the `APP_PROFILES` environment variable and default to `local`.
+Active profiles are read from `app.profiles` or the `APP_PROFILES` environment variable and default to `local`. The `ktor` block binds to the `KtorProps` inside `MyConfig` — `banner` is what prints at startup. `app.profiles` never reaches your config class; `configureKtorServer` consumes it before `loadConfig` runs.
 
 ### 7. Run
 

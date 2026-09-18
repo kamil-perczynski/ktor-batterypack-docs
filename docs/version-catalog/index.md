@@ -10,7 +10,7 @@ It does not replace Gradle's version catalog mechanism — it is an import that 
 
 ## How to use it
 
-If you followed [Get Started](/introduction/get-started#_1-add-the-repository-and-version-catalog), your `settings.gradle.kts` already looks like this. The recommended shape — taken from a real consumer, the `opencode-agents` backend — declares two catalogs side by side:
+If you followed [Get Started](/introduction/get-started#_1-add-the-repository-and-version-catalog), your `settings.gradle.kts` already looks like this. The recommended shape — taken from a real consumer — declares two catalogs side by side:
 
 ```kotlin
 pluginManagement {
@@ -48,7 +48,6 @@ plugins {
     alias(batterypackLibs.plugins.kotlin.jvm)
     alias(batterypackLibs.plugins.koin.compiler)
     alias(batterypackLibs.plugins.ktor.batterypack)
-    application
 }
 
 dependencies {
